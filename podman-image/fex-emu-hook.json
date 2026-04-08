@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "hook": {
+    "path": "/usr/local/bin/fex-emu-hook.sh"
+  },
+  "when": {
+    "annotations": {
+      "io.podman.image.arch": "amd64"
+    }
+  },
+  "stages": ["precreate"]
+}

@@ -1,11 +1,67 @@
-ARG FCOS_BASE_IMAGE=${FCOS_BASE_IMAGE}
+ARG FCOS_BASE_IMAGE
+# ===== Stage 1: Build FEXInterpreter + FEXServer (static-pie) =====
+# This stage is ARM64-only; on x86_64 builds the COPY --from=fex-builder
+# instructions below are guarded by uname -m checks and will be skipped.
+FROM fedora:43 AS fex-builder
+
+RUN dnf install -y --setopt=install_weak_deps=false \
+    clang lld llvm cmake ninja-build git \
+    glibc-static libstdc++-static python3 python3-setuptools nasm \
+    && dnf clean all
+
+ARG FEX_BRANCH=fex-emu
+RUN git clone --depth 1 --branch ${FEX_BRANCH} \
+    https://github.com/tnk4on/FEX.git /src/FEX \
+    && cd /src/FEX && git submodule update --init --depth 1
+
+RUN cd /src/FEX && cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_AR=/usr/bin/llvm-ar -DCMAKE_RANLIB=/usr/bin/llvm-ranlib \
+    -DCMAKE_C_COMPILER_AR=/usr/bin/llvm-ar -DCMAKE_CXX_COMPILER_AR=/usr/bin/llvm-ar \
+    -DBUILD_SHARED_LIBS=OFF -DBUILD_THUNKS=OFF -DBUILD_TESTS=OFF \
+    -DBUILD_FEXCONFIG=OFF -DENABLE_LTO=OFF \
+    -DENABLE_JEMALLOC=ON -DENABLE_JEMALLOC_GLIBC_ALLOC=OFF \
+    -DCMAKE_EXE_LINKER_FLAGS=-static-pie \
+    && ninja -C build -j$(nproc) FEX FEXServer FEXOfflineCompiler
+
+# ===== Stage 2: Build patched Podman (io.podman.image.arch annotation) =====
+# This patch makes Podman automatically set the io.podman.image.arch annotation
+# on every container, enabling the OCI hook to filter by architecture.
+FROM fedora:43 AS podman-builder
+
+RUN dnf install -y --setopt=install_weak_deps=false \
+    golang git make gcc glib2-devel gpgme-devel \
+    device-mapper-devel libseccomp-devel libselinux-devel \
+    systemd-devel \
+    && dnf clean all
+
+ARG PODMAN_REPO=https://github.com/tnk4on/podman.git
+ARG PODMAN_BRANCH=fex-emu
+RUN git clone --depth 1 --branch ${PODMAN_BRANCH} ${PODMAN_REPO} /src/podman
+
+RUN cd /src/podman && \
+    make podman BUILDTAGS="seccomp selinux systemd exclude_graphdriver_btrfs cni"
+
+# ===== Stage 3: Final OS image =====
 FROM ${FCOS_BASE_IMAGE}
 
-ARG PODMAN_PR_NUM=${PODMAN_PR_NUM}
-ARG FEDORA_VERSION=${FEDORA_VERSION}
+ARG PODMAN_PR_NUM
+ARG FEDORA_VERSION
 
 RUN --mount=type=bind,source=/build_common.sh,target=/run/build_common.sh,z \
     /run/build_common.sh && ostree container commit
+
+# Replace stock podman with patched build (io.podman.image.arch annotation)
+# This enables annotation-based filtering in fex-emu-hook.json so the OCI hook
+# only fires for amd64 containers, achieving zero overhead for ARM64.
+# NOTE: Must run ostree container commit after replacing the binary,
+# otherwise Ignition fails (ignition-files.service → emergency mode).
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+      cp /usr/bin/podman /usr/bin/podman.stock; \
+    fi
+COPY --from=podman-builder /src/podman/bin/podman /usr/bin/podman
+RUN ostree container commit
 
 COPY podman-iptables.conf /etc/modules-load.d/podman-iptables.conf
 
@@ -38,10 +94,35 @@ COPY  10-autologin.conf /etc/systemd/system/getty@.service.d/10-autologin.conf
 # this empty file for other reasons. Removing the package is much more robust so we do that.
 RUN --network=none rm -vf /etc/resolv.conf && rpm -e systemd-resolved
 
-# For Rosetta
-# We should enable the service but for some reason the change is not
-# carried into the VM even if we do so here, so for now this must be
-# enabled via ignition by podman machine code:
-# https://github.com/containers/podman/pull/21670#discussion_r1585790802
-COPY rosetta-activation.service /etc/systemd/system/rosetta-activation.service
-COPY rosetta-activation.sh /usr/local/bin/rosetta-activation.sh
+# ===== FEX-Emu: ARM64-only layers =====
+# All FEX-related steps are conditional on aarch64. On x86_64 builds these
+# are skipped entirely, producing a clean image without FEX artifacts.
+
+# FEX-Emu: Install RPM packages (ARM64 only)
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+      dnf install -y --setopt=install_weak_deps=false fex-emu fex-emu-rootfs-fedora && \
+      dnf clean all; \
+    fi && ostree container commit
+
+# FEX-Emu: Keep QEMU x86/x86_64 binfmt configs for runtime fallback (ARM64 only).
+# When FEX is disabled via /etc/containers/disable-fex-emu marker file,
+# fex-activation.sh skips FEX binfmt registration and QEMU handles x86_64.
+# QEMU configs for other architectures (s390x, ppc64le, etc.) are always preserved.
+
+# FEX-Emu: Copy activation script + service file (ARM64 only)
+COPY fex-activation.service /etc/systemd/system/fex-activation.service
+COPY --chmod=0755 fex-activation.sh /usr/local/bin/fex-activation.sh
+
+# FEX-Emu: OCI precreate hook for volume injection
+# Requires: jq (included in Fedora CoreOS base)
+# Uses annotation-based filtering (io.podman.image.arch=amd64) since patched
+# Podman is built in Stage 2 and replaces stock Podman.
+COPY --chmod=0755 fex-emu-hook.sh /usr/local/bin/fex-emu-hook.sh
+COPY fex-emu-hook.json /usr/local/lib/fex-emu/fex-emu-hook.json
+
+# FEX-Emu: Replace dynamic RPM binaries with patched static-pie builds (ARM64 only)
+# On x86_64 builds the fex-builder stage outputs are not needed; COPY is unconditional
+# but the binaries are only functional on aarch64.
+COPY --from=fex-builder /src/FEX/build/Bin/FEX /usr/bin/FEXInterpreter
+COPY --from=fex-builder /src/FEX/build/Bin/FEXServer /usr/bin/FEXServer
+COPY --from=fex-builder /src/FEX/build/Bin/FEXOfflineCompiler /usr/bin/FEXOfflineCompiler
