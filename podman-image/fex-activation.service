@@ -1,0 +1,14 @@
+[Unit]
+Description=FEX-Emu Setup and binfmt_misc Registration
+DefaultDependencies=no
+After=systemd-binfmt.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fex-activation.sh
+RemainAfterExit=yes
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
