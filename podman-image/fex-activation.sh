@@ -50,12 +50,13 @@ EOF
 
     # Code caching: enabled by default via Config.json EnableCodeCachingWIP.
     # FEXServer caches JIT-compiled code per container in /tmp/fex-data/cache/.
+    # FEX_APP_* env vars are set in containers.conf for all containers
+    # (harmless for ARM64; FEX is only invoked via binfmt_misc for x86/x86_64).
 
-    # FEX volumes and env vars are injected via OCI precreate hook.
-    # The hook modifies each container's OCI config.json to add FEX bind mounts
-    # and FEX_APP_* env vars. Annotation-based filtering (io.podman.image.arch=amd64)
-    # ensures only amd64 containers are modified; ARM64 containers have zero overhead.
-    # The specFromState fix in podman ensures `podman exec` inherits these env vars.
+    # FEX volumes are injected via OCI precreate hook.
+    # The hook modifies each container's OCI config.json to add FEX bind mounts.
+    # Annotation-based filtering (io.podman.image.arch=amd64) ensures only amd64
+    # containers get the mounts; ARM64 containers have zero overhead.
     mkdir -p /etc/containers/oci/hooks.d
     cp /usr/local/lib/fex-emu/fex-emu-hook.json /etc/containers/oci/hooks.d/
     echo "FEX: OCI precreate hook installed"
@@ -74,31 +75,31 @@ EOF
         fi
     done
 
-    # Rootless config: hooks_dir only (FEX_APP_* env is injected by OCI hook per-container)
+    # Rootless config: hooks_dir + FEX_APP_* env for in-container paths
     CORE_CONTAINERS_DIR="/var/home/core/.config/containers"
     mkdir -p "$CORE_CONTAINERS_DIR" 2>/dev/null || true
     cat > "$CORE_CONTAINERS_DIR/containers.conf" << 'CEOF'
 [containers]
 netns="bridge"
 pids_limit=0
-env = []
+env = ["FEX_APP_DATA_LOCATION=/tmp/fex-data/", "FEX_APP_CONFIG_LOCATION=/tmp/fex-data/", "FEX_APP_CACHE_LOCATION=/tmp/fex-data/cache/"]
 
 [engine]
 hooks_dir = ["/etc/containers/oci/hooks.d"]
 CEOF
     chown -R core:core "$CORE_CONTAINERS_DIR"
 
-    # Rootful config: hooks_dir only (FEX_APP_* env is injected by OCI hook per-container)
+    # Rootful config: hooks_dir + FEX_APP_* env
     mkdir -p /root/.config/containers 2>/dev/null || true
     cat > /root/.config/containers/containers.conf << 'CEOF'
 [containers]
-env = []
+env = ["FEX_APP_DATA_LOCATION=/tmp/fex-data/", "FEX_APP_CONFIG_LOCATION=/tmp/fex-data/", "FEX_APP_CACHE_LOCATION=/tmp/fex-data/cache/"]
 
 [engine]
 hooks_dir = ["/etc/containers/oci/hooks.d"]
 CEOF
 
-    echo "FEX: containers.conf configured (rootless + rootful, OCI hook handles FEX_APP_* env)"
+    echo "FEX: containers.conf configured (rootless + rootful, FEX_APP_* env for all containers)"
 
     # Restart podman API service to pick up new containers.conf
     # The podman socket-activated service may have started before this script
