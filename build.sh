@@ -52,7 +52,7 @@ if [[ ${PODMAN_PR_NUM} != "" ]]; then
 fi
 set -e
 
-ZSTD_CMD="zstd --rm -f -T0 -14"
+ZSTD_CMD="zstd --rm -T0 -14"
 WSL_LOG=$(mktemp)
 mkdir -p "$OUTDIR"
 

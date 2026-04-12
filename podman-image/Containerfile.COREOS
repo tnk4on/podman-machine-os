@@ -10,12 +10,14 @@ RUN dnf install -y --setopt=install_weak_deps=false \
     && dnf clean all
 
 ARG FEX_BRANCH=fex-emu
+ARG FEX_VERSION=FEX-2604
 RUN git clone --depth 1 --branch ${FEX_BRANCH} \
     https://github.com/tnk4on/FEX.git /src/FEX \
     && cd /src/FEX && git submodule update --init --depth 1
 
 RUN cd /src/FEX && cmake -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DOVERRIDE_VERSION=${FEX_VERSION} \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_AR=/usr/bin/llvm-ar -DCMAKE_RANLIB=/usr/bin/llvm-ranlib \
     -DCMAKE_C_COMPILER_AR=/usr/bin/llvm-ar -DCMAKE_CXX_COMPILER_AR=/usr/bin/llvm-ar \
@@ -37,7 +39,7 @@ RUN dnf install -y --setopt=install_weak_deps=false \
     && dnf clean all
 
 ARG PODMAN_REPO=https://github.com/tnk4on/podman.git
-ARG PODMAN_BRANCH=fex-emu
+ARG PODMAN_BRANCH=fex-emu-next
 RUN git clone --depth 1 --branch ${PODMAN_BRANCH} ${PODMAN_REPO} /src/podman
 
 RUN cd /src/podman && \
