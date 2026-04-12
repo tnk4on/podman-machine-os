@@ -49,7 +49,7 @@ EOF
     echo "FEX: Config set with RootFS=$ROOTFS_DIR"
 
     # Code caching: enabled by default via Config.json EnableCodeCachingWIP.
-    # FEXServer caches JIT-compiled code per container in /tmp/fex-data/cache/.
+    # FEXServer caches JIT-compiled code per container in /tmp/fex-emu/cache/.
     # FEX_APP_* env vars are set in containers.conf for all containers
     # (harmless for ARM64; FEX is only invoked via binfmt_misc for x86/x86_64).
 
@@ -92,7 +92,7 @@ EOF
 [containers]
 netns="bridge"
 pids_limit=0
-env = ["FEX_APP_DATA_LOCATION=/tmp/fex-data/", "FEX_APP_CONFIG_LOCATION=/tmp/fex-data/", "FEX_APP_CACHE_LOCATION=/tmp/fex-data/cache/", "FEX_ENABLECODECACHINGWIP=1"]
+env = ["FEX_APP_DATA_LOCATION=/tmp/fex-emu/", "FEX_APP_CONFIG_LOCATION=/tmp/fex-emu/", "FEX_APP_CACHE_LOCATION=/tmp/fex-emu/cache/", "FEX_ENABLECODECACHINGWIP=1"]
 
 [engine]
 hooks_dir = ["/etc/containers/oci/hooks.d"]
@@ -103,7 +103,7 @@ CEOF
     mkdir -p /root/.config/containers 2>/dev/null || true
     cat > /root/.config/containers/containers.conf << 'CEOF'
 [containers]
-env = ["FEX_APP_DATA_LOCATION=/tmp/fex-data/", "FEX_APP_CONFIG_LOCATION=/tmp/fex-data/", "FEX_APP_CACHE_LOCATION=/tmp/fex-data/cache/", "FEX_ENABLECODECACHINGWIP=1"]
+env = ["FEX_APP_DATA_LOCATION=/tmp/fex-emu/", "FEX_APP_CONFIG_LOCATION=/tmp/fex-emu/", "FEX_APP_CACHE_LOCATION=/tmp/fex-emu/cache/", "FEX_ENABLECODECACHINGWIP=1"]
 
 [engine]
 hooks_dir = ["/etc/containers/oci/hooks.d"]
