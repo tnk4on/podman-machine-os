@@ -13,6 +13,15 @@ DISABLE_MARKER="/etc/containers/disable-fex-emu"
 
 if [ -f "$DISABLE_MARKER" ]; then
     echo "FEX: Disabled by marker file $DISABLE_MARKER — using QEMU fallback"
+    # Unregister FEX binfmt handlers that systemd-binfmt.service may have
+    # already registered from /usr/lib/binfmt.d/FEX-*.conf (RPM-installed).
+    # Without this, FEX handlers remain active despite the disable marker.
+    for handler in FEX-x86 FEX-x86_64; do
+        if [ -f "/proc/sys/fs/binfmt_misc/$handler" ]; then
+            echo -1 > "/proc/sys/fs/binfmt_misc/$handler"
+            echo "FEX: Unregistered $handler (disabled mode)"
+        fi
+    done
     exit 0
 fi
 
