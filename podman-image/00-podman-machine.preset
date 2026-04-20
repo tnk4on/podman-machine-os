@@ -10,3 +10,4 @@ disable coreos-container-signing-migration-motd.service
 
 # Disable coreos chrony config, we do provide our own.
 disable coreos-platform-chrony-config.service
+enable fex-activation.service
